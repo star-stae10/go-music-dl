@@ -228,7 +228,8 @@ func RegisterVideogenRoutes(api *gin.RouterGroup, videoDir string) {
 			source = req.Source
 		}
 
-		sessionID := fmt.Sprintf("%s_%s_%d", source, id, time.Now().Unix())
+		sanitizedID := strings.NewReplacer("|", "-", "/", "-", "\\", "-", ":", "-").Replace(id)
+		sessionID := fmt.Sprintf("%s_%s_%d", source, sanitizedID, time.Now().Unix())
 		tempDir, err := os.MkdirTemp("", "vg_render_"+sessionID+"_*")
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to create render session"})

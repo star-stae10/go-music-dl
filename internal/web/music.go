@@ -573,6 +573,14 @@ func RegisterMusicRoutes(api *gin.RouterGroup) {
 					mu.Unlock()
 				}
 			}
+			if searchType == "playlist" && containsLocalSource(sources) {
+				localPlaylists := localCollectionSearchPlaylists(keyword)
+				if len(localPlaylists) > 0 {
+					mu.Lock()
+					allPlaylists = append(allPlaylists, localPlaylists...)
+					mu.Unlock()
+				}
+			}
 		}
 
 		if searchType == "song" && exactArtist != "" && len(allSongs) > 0 {

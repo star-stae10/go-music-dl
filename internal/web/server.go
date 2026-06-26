@@ -211,6 +211,9 @@ func renderIndex(c *gin.Context, songs []model.Song, playlists []model.Playlist,
 	for _, s := range core.GetPlaylistSourceNames() {
 		playlistSupported[s] = true
 	}
+	// 本地音乐支持歌单搜索（搜本地自建/导入歌单），但不进 GetPlaylistSourceNames
+	// 以免成为默认勾选项——这里仅开启复选框在歌单模式下可用。
+	playlistSupported["local"] = true
 	albumSupported := make(map[string]bool)
 	for _, s := range core.GetAlbumSourceNames() {
 		albumSupported[s] = true

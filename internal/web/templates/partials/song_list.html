@@ -263,6 +263,13 @@
                     <i class="fa-regular fa-image"></i>
                 </a>
                 {{ end }}
+
+                {{ if and $isLocalSong (eq $.ColID "") }}
+                <button type="button" class="btn-circle btn-delete-local" title="删除本地音乐"
+                        onclick="deleteLocalMusicFromButton(this)">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+                {{ end }}
                 {{ end }}
             </div>
         </li>

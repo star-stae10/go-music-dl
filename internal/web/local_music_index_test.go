@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/guohuiyuan/go-music-dl/core"
@@ -121,6 +122,41 @@ func TestSearchRouteIncludesLocalSourceForSongType(t *testing.T) {
 	}
 	if containsLocalSource([]string{"netease", "qq"}) {
 		t.Fatal("containsLocalSource should be false without local")
+	}
+}
+
+func TestLocalCollectionSearchPlaylists(t *testing.T) {
+	initCollectionDBForTest(t)
+
+	cols := []Collection{
+		{Name: "我的摇滚", Kind: collectionKindManual, ContentType: collectionContentPlaylist, Source: "local"},
+		{Name: "爵士精选", Kind: collectionKindManual, ContentType: collectionContentPlaylist, Source: "local"},
+	}
+	if err := db.Create(&cols).Error; err != nil {
+		t.Fatalf("create collections: %v", err)
+	}
+
+	got := localCollectionSearchPlaylists("摇滚")
+	if len(got) != 1 || got[0].Name != "我的摇滚" || got[0].Source != "local" {
+		t.Fatalf("search = %+v, want single 我的摇滚 local playlist", got)
+	}
+
+	if res := localCollectionSearchPlaylists("不存在"); len(res) != 0 {
+		t.Fatalf("search miss = %+v, want empty", res)
+	}
+}
+
+func TestLocalPlaylistSupportedInRenderIndex(t *testing.T) {
+	if !containsStringValue(core.GetAllSourceNames(), "local") {
+		t.Fatal("local missing from all sources")
+	}
+	// 歌单模式下 local 复选框应可用：renderIndex 显式开启 PlaylistSupported[local]。
+	content, err := templateFS.ReadFile("templates/partials/search_box.html")
+	if err != nil {
+		t.Fatalf("read search_box: %v", err)
+	}
+	if !strings.Contains(string(content), "data-playlist-supported") {
+		t.Fatal("search box missing data-playlist-supported wiring")
 	}
 }
 

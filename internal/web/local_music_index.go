@@ -9,9 +9,7 @@ import (
 
 	"github.com/guohuiyuan/music-lib/model"
 	"gorm.io/gorm/clause"
-)
-
-// LocalMusicIndex 是下载目录的搜索索引行。磁盘文件仍是唯一真相，
+)// LocalMusicIndex 是下载目录的搜索索引行。磁盘文件仍是唯一真相，
 // 该表只用于加速对大量本地文件的关键词搜索。主键沿用 base64(相对路径)。
 type LocalMusicIndex struct {
 	ID        string    `gorm:"column:id;primaryKey"`
@@ -201,3 +199,25 @@ func localMusicSearchSongs(keyword string, limit int) []model.Song {
 	}
 	return songs
 }
+
+// localCollectionSearchPlaylists 在本地歌单（Collection）里按名称/描述/创建者搜索，
+// 返回 model.Playlist 卡片（Source=local），用于"歌单搜索 + 勾选 local"。
+func localCollectionSearchPlaylists(keyword string) []model.Playlist {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" || db == nil {
+		return nil
+	}
+	like := "%" + keyword + "%"
+	var collections []Collection
+	if err := db.Where("name LIKE ? OR description LIKE ? OR creator LIKE ?", like, like, like).
+		Order("id DESC").
+		Find(&collections).Error; err != nil {
+		return nil
+	}
+	playlists := make([]model.Playlist, 0, len(collections))
+	for _, collection := range collections {
+		playlists = append(playlists, collection.playlistCard())
+	}
+	return playlists
+}
+

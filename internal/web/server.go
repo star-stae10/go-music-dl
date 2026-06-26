@@ -358,6 +358,7 @@ func StartWithOptions(port string, opts StartOptions) {
 	}
 	InitDB()
 	defer CloseDB()
+	syncLocalMusicIndexAsync()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()

@@ -308,7 +308,6 @@ func TestManualCollectionLocalSongRendersLocalActionOrder(t *testing.T) {
 	card := body[cardStart : cardStart+cardEnd]
 
 	forbidden := []string{
-		`class="btn-circle btn-switch"`,
 		`class="btn-circle btn-dl btn-download"`,
 	}
 	for _, token := range forbidden {
@@ -319,6 +318,7 @@ func TestManualCollectionLocalSongRendersLocalActionOrder(t *testing.T) {
 
 	required := []string{
 		`class="btn-circle btn-play"`,
+		`class="btn-circle btn-switch"`,
 		`removeSongFromCollection`,
 		`class="btn-circle btn-dl btn-lyric"`,
 		`class="btn-circle btn-dl btn-cover"`,
@@ -331,11 +331,12 @@ func TestManualCollectionLocalSongRendersLocalActionOrder(t *testing.T) {
 	}
 
 	playIndex := strings.Index(card, `class="btn-circle btn-play"`)
+	switchIndex := strings.Index(card, `class="btn-circle btn-switch"`)
 	removeIndex := strings.Index(card, `removeSongFromCollection`)
 	lyricIndex := strings.Index(card, `class="btn-circle btn-dl btn-lyric"`)
 	coverIndex := strings.Index(card, `class="btn-circle btn-dl btn-cover"`)
-	if !(playIndex < removeIndex && removeIndex < lyricIndex && lyricIndex < coverIndex) {
-		t.Fatalf("manual collection local song action order mismatch: play=%d remove=%d lyric=%d cover=%d", playIndex, removeIndex, lyricIndex, coverIndex)
+	if !(playIndex < switchIndex && switchIndex < removeIndex && removeIndex < lyricIndex && lyricIndex < coverIndex) {
+		t.Fatalf("manual collection local song action order mismatch: play=%d switch=%d remove=%d lyric=%d cover=%d", playIndex, switchIndex, removeIndex, lyricIndex, coverIndex)
 	}
 }
 
@@ -584,7 +585,7 @@ func TestUploadLocalMusicAddToCollectionAndDownload(t *testing.T) {
 	}
 }
 
-func TestDeleteLocalMusicRequiresRemovingCollectionReferencesFirst(t *testing.T) {
+func TestDeleteLocalMusicHardDeletesAndKeepsCollectionEntries(t *testing.T) {
 	initCollectionDBForTest(t)
 
 	downloadDir := t.TempDir()
@@ -612,49 +613,42 @@ func TestDeleteLocalMusicRequiresRemovingCollectionReferencesFirst(t *testing.T)
 		t.Fatalf("create saved local songs: %v", err)
 	}
 
+	// Seed an index row so we can confirm it is removed on delete.
+	if err := db.Create(&LocalMusicIndex{ID: localID, RelPath: "Delete Me.mp3", Name: "Delete Me"}).Error; err != nil {
+		t.Fatalf("seed index row: %v", err)
+	}
+
 	router := newLocalMusicTestRouter()
 	req := httptest.NewRequest(http.MethodDelete, RoutePrefix+"/local_music?id="+url.QueryEscape(localID), nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("DELETE /local_music status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "Local One") || !strings.Contains(rec.Body.String(), "Local Two") {
-		t.Fatalf("DELETE /local_music body = %s, want referenced collection names", rec.Body.String())
-	}
-	if _, err := os.Stat(audioPath); err != nil {
-		t.Fatalf("local file should still exist after blocked deletion: %v", err)
-	}
-
-	var count int64
-	if err := db.Model(&SavedSong{}).
-		Where("song_id = ? AND source IN ?", localID, []string{localMusicSource, legacyLocalMusicSource}).
-		Count(&count).Error; err != nil {
-		t.Fatalf("count saved local songs: %v", err)
-	}
-	if count != 2 {
-		t.Fatalf("saved local songs count = %d, want 2", count)
-	}
-
-	for _, savedSong := range saved {
-		removeURL := fmt.Sprintf("%s/collections/%d/songs?id=%s&source=%s", RoutePrefix, savedSong.CollectionID, url.QueryEscape(savedSong.SongID), url.QueryEscape(savedSong.Source))
-		req = httptest.NewRequest(http.MethodDelete, removeURL, nil)
-		rec = httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("DELETE collection song status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
-		}
-	}
-
-	req = httptest.NewRequest(http.MethodDelete, RoutePrefix+"/local_music?id="+url.QueryEscape(localID), nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
+	// Hard delete succeeds even though the track is referenced by collections.
 	if rec.Code != http.StatusOK {
-		t.Fatalf("DELETE /local_music after uncollect status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		t.Fatalf("DELETE /local_music status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	if _, err := os.Stat(audioPath); !os.IsNotExist(err) {
 		t.Fatalf("deleted local file stat err = %v, want not exists", err)
 	}
+
+	// Collection entries remain (they will render as invalid and can be switched).
+	var savedCount int64
+	if err := db.Model(&SavedSong{}).
+		Where("song_id = ? AND source IN ?", localID, []string{localMusicSource, legacyLocalMusicSource}).
+		Count(&savedCount).Error; err != nil {
+		t.Fatalf("count saved local songs: %v", err)
+	}
+	if savedCount != 2 {
+		t.Fatalf("saved local songs count = %d, want 2 (collection entries must remain)", savedCount)
+	}
+
+	// The index row is gone, so the track no longer appears in search.
+	var indexCount int64
+	if err := db.Model(&LocalMusicIndex{}).Where("id = ?", localID).Count(&indexCount).Error; err != nil {
+		t.Fatalf("count index rows: %v", err)
+	}
+	if indexCount != 0 {
+		t.Fatalf("index row count = %d, want 0 after hard delete", indexCount)
+	}
 }
+

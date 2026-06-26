@@ -515,6 +515,9 @@ func RegisterMusicRoutes(api *gin.RouterGroup) {
 			var mu sync.Mutex
 
 			for _, src := range sources {
+				if isLocalMusicSource(src) {
+					continue
+				}
 				wg.Add(1)
 				go func(s string) {
 					defer wg.Done()
@@ -561,6 +564,15 @@ func RegisterMusicRoutes(api *gin.RouterGroup) {
 				}(src)
 			}
 			wg.Wait()
+
+			if searchType == "song" && containsLocalSource(sources) {
+				localSongs := localMusicSearchSongs(keyword, 200)
+				if len(localSongs) > 0 {
+					mu.Lock()
+					allSongs = append(allSongs, localSongs...)
+					mu.Unlock()
+				}
+			}
 		}
 
 		if searchType == "song" && exactArtist != "" && len(allSongs) > 0 {
@@ -1256,6 +1268,9 @@ func isSwitchSourceAllowed(source string, current string) bool {
 		return false
 	}
 	if source == "soda" || source == "fivesing" {
+		return false
+	}
+	if isLocalMusicSource(source) {
 		return false
 	}
 	return true

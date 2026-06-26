@@ -169,6 +169,7 @@ func RegisterLocalMusicRoutes(api *gin.RouterGroup) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		upsertLocalMusicIndexRow(track)
 
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
@@ -233,6 +234,66 @@ func RegisterLocalMusicRoutes(api *gin.RouterGroup) {
 			"status":    "ok",
 			"duplicate": tx.RowsAffected == 0,
 			"song":      song,
+		})
+	})
+
+	colAPI.POST("/:id/local_music/batch", func(c *gin.Context) {
+		collection, err := loadCollection(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "歌单不存在"})
+			return
+		}
+		if collection.isImported() {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "外部导入歌单/专辑不支持直接添加本地音乐"})
+			return
+		}
+
+		var req struct {
+			IDs []string `json:"ids" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || len(req.IDs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "缺少本地音乐 ID 列表"})
+			return
+		}
+
+		songs := make([]SavedSong, 0, len(req.IDs))
+		failed := 0
+		for _, id := range req.IDs {
+			track, err := localMusicTrackByID(id)
+			if err != nil {
+				failed++
+				continue
+			}
+			extra, _ := json.Marshal(track.Extra)
+			songs = append(songs, SavedSong{
+				CollectionID: collection.ID,
+				SongID:       track.ID,
+				Source:       localMusicSource,
+				Extra:        string(extra),
+				Name:         track.Name,
+				Artist:       track.Artist,
+				Cover:        track.Cover,
+				Duration:     track.Duration,
+				AddedAt:      time.Now(),
+			})
+		}
+
+		added := 0
+		if len(songs) > 0 {
+			tx := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&songs)
+			if tx.Error != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "批量添加失败: " + tx.Error.Error()})
+				return
+			}
+			added = int(tx.RowsAffected)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "ok",
+			"requested": len(req.IDs),
+			"added":     added,
+			"duplicate": len(songs) - added,
+			"failed":    failed,
 		})
 	})
 }
@@ -1261,51 +1322,17 @@ func removeString(values []string, target string) []string {
 	return filtered
 }
 
-func localMusicSavedCollectionNames(trackID string) ([]string, error) {
-	if db == nil {
-		return nil, nil
-	}
-
-	trackID = strings.TrimSpace(trackID)
-	if trackID == "" {
-		return nil, nil
-	}
-
-	var collections []Collection
-	if err := db.
-		Joins("JOIN saved_songs ON saved_songs.collection_id = collections.id").
-		Where("saved_songs.song_id = ? AND saved_songs.source IN ?", trackID, []string{localMusicSource, legacyLocalMusicSource}).
-		Order("collections.id DESC").
-		Find(&collections).Error; err != nil {
-		return nil, err
-	}
-
-	names := make([]string, 0, len(collections))
-	for _, collection := range collections {
-		name := strings.TrimSpace(collection.Name)
-		if name == "" {
-			name = fmt.Sprintf("歌单 %d", collection.ID)
-		}
-		names = append(names, name)
-	}
-	return names, nil
-}
-
 func deleteLocalMusicTrack(id string) error {
 	track, err := localMusicTrackByID(id)
 	if err != nil {
 		return errors.New("本地音乐不存在或已不在下载目录内")
 	}
-	collectionNames, err := localMusicSavedCollectionNames(track.ID)
-	if err != nil {
-		return err
-	}
-	if len(collectionNames) > 0 {
-		return fmt.Errorf("本地音乐已收藏在：%s。请先从这些自建歌单中取消收藏，再删除本地文件", strings.Join(collectionNames, "、"))
-	}
+	// 硬删除：删磁盘文件 + 删索引行。收藏歌单里的引用条目保留，
+	// 之后在歌单详情页会显示为失效，可换源到在线源。
 	if err := os.Remove(track.absPath); err != nil {
 		return err
 	}
+	deleteLocalMusicIndexRow(track.ID)
 	invalidateLocalMusicScanCache()
 	return nil
 }

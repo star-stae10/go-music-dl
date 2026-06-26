@@ -4126,6 +4126,7 @@ function updateBatchToolbar() {
     const batchSwitch = document.getElementById('btn-batch-switch');
     const batchDl = document.getElementById('btn-batch-dl');
     const batchDeleteLocal = document.getElementById('btn-batch-delete-local');
+    const batchFavLocal = document.getElementById('btn-batch-fav-local');
     const batchRemoveCollection = document.getElementById('btn-batch-remove-collection');
     
     if(document.getElementById('selected-count')) {
@@ -4145,11 +4146,13 @@ function updateBatchToolbar() {
         if(batchSwitch) batchSwitch.disabled = nonLocalCount === 0;
         if(batchDl) batchDl.disabled = nonLocalCount === 0;
         if(batchDeleteLocal) batchDeleteLocal.disabled = localCount === 0;
+        if(batchFavLocal) batchFavLocal.disabled = localCount === 0;
         if(batchRemoveCollection) batchRemoveCollection.disabled = false;
     } else {
         if(batchSwitch) batchSwitch.disabled = true;
         if(batchDl) batchDl.disabled = true;
         if(batchDeleteLocal) batchDeleteLocal.disabled = true;
+        if(batchFavLocal) batchFavLocal.disabled = true;
         if(batchRemoveCollection) batchRemoveCollection.disabled = true;
     }
     
@@ -4795,6 +4798,46 @@ function playAllSongs() {
     }
 }
 
+let pendingBatchFavIds = [];
+
+function batchAddLocalMusicToCollection() {
+    const songs = getSelectedSongs().filter(song => isLocalMusicSourceValue(song.source));
+    if (songs.length === 0) {
+        alert('请先选择本地音乐');
+        return;
+    }
+    pendingBatchFavIds = songs.map(song => song.id).filter(Boolean);
+    pendingFavSong = null;
+    document.getElementById('addToCollectionModal').style.display = 'flex';
+    refreshAddToCollectionList();
+}
+
+async function submitBatchAddLocalMusicToCollection(colId) {
+    const ids = pendingBatchFavIds.slice();
+    pendingBatchFavIds = [];
+    if (!colId || ids.length === 0) return;
+
+    try {
+        const response = await fetch(`${API_ROOT}/collections/${colId}/local_music/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids })
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload || payload.error) {
+            throw new Error((payload && payload.error) || '批量收藏失败');
+        }
+        document.getElementById('addToCollectionModal').style.display = 'none';
+        let message = `批量收藏完成：新增 ${payload.added || 0}`;
+        if (payload.duplicate) message += `，已存在 ${payload.duplicate}`;
+        if (payload.failed) message += `，失败 ${payload.failed}`;
+        alert(message);
+        await refreshCurrentPageContent({ scroll: false });
+    } catch (error) {
+        alert(error.message || '批量收藏失败');
+    }
+}
+
 function openCollectionManager() {
     navigateTo(API_ROOT + '/my_collections');
 }
@@ -4967,7 +5010,13 @@ function refreshAddToCollectionList() {
                     </div>
                 `;
                 
-                item.querySelector('.col-clickable-area').onclick = () => addSongToCollection(col.id);
+                item.querySelector('.col-clickable-area').onclick = () => {
+                    if (pendingBatchFavIds && pendingBatchFavIds.length > 0) {
+                        submitBatchAddLocalMusicToCollection(col.id);
+                    } else {
+                        addSongToCollection(col.id);
+                    }
+                };
                 item.querySelector('.btn-edit').onclick = (e) => {
                     e.stopPropagation();
                     showEditCollectionModal(col.id, col.name, col.description || '', col.cover || '');

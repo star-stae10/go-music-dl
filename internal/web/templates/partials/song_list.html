@@ -80,6 +80,9 @@
         </div>
         <div class="batch-actions">
             {{ if $isLocalMusicPage }}
+            <button class="btn-pill btn-pill-fav" id="btn-batch-fav-local" onclick="batchAddLocalMusicToCollection()" disabled>
+                <i class="fa-regular fa-heart"></i> 批量收藏
+            </button>
             <button class="btn-pill btn-pill-warn" id="btn-batch-delete-local" onclick="batchDeleteLocalMusic()" disabled>
                 <i class="fa-solid fa-trash"></i> 批量删除
             </button>
@@ -214,7 +217,7 @@
                 {{ end }}
 
                 {{ if not $isLocalMusicPage }}
-                {{ if not $isLocalSong }}
+                {{ if or (not $isLocalSong) (ne $.ColID "") }}
                 <button type="button" class="btn-circle btn-switch" title="换源"
                         onclick="switchSource(this)">
                     <i class="fa-solid fa-arrows-rotate"></i>
